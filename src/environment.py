@@ -31,6 +31,10 @@ class StockTradingEnvironment:
         self.env = gym.make('TradingEnv', df=self.stock_data, positions=self.positions, windows=self.windows, trading_fees=self.trading_fees, borrow_interest_rate=self.borrow_interest_rate, portfolio_initial_value=self.portfolio_initial_value, initial_position=self.initial_position, max_episode_duration=self.max_episode_duration, verbose=self.verbose)
         self.action_space = self.env.action_space
 
+        # Add custom metrics
+        self.env.unwrapped.add_metric('Position Changes', lambda history: np.sum(np.diff(history['position']) != 0))
+        self.env.unwrapped.add_metric('Episode Length', lambda history: len(history['position']))
+
     def _add_technical_indicators(self, df):
         df = add_all_ta_features(df, open="open", high="high", low="low", close="close", volume="volume")
         df.fillna(0, inplace=True)

@@ -9,9 +9,8 @@ np.random.seed(69)
 class StockTradingEnvironment:
     """This class wraps the gym-trading-env environment."""
 
-    def __init__(self, file_path, train=True, number_of_days_to_consider=20, positions=[-1, 0, 1], windows=None, trading_fees=0, borrow_interest_rate=0, portfolio_initial_value=1000, initial_position='random', max_episode_duration='max', verbose=1):
-        self.file_path = file_path
-        self.stock_data = pd.read_csv(self.file_path, index_col='date', parse_dates=True)
+    def __init__(self, df, train=True, number_of_days_to_consider=20, positions=[-1, 0, 1], windows=None, trading_fees=0, borrow_interest_rate=0, portfolio_initial_value=1000, initial_position='random', max_episode_duration='max', verbose=1):
+        self.df = df
         self.train = train
         self.number_of_days_to_consider = number_of_days_to_consider
         self.positions = positions
@@ -24,11 +23,11 @@ class StockTradingEnvironment:
         self.verbose = verbose
 
         # Adding technical indicators
-        self.stock_data = self._add_technical_indicators(self.stock_data)
-        print("Columns after adding technical indicators:", self.stock_data.columns)  # Debugging line
+        self.df = self._add_technical_indicators(self.df)
+        print("Columns after adding technical indicators:", self.df.columns)  # Debugging line
 
         # Initialize the gym-trading-env environment
-        self.env = gym.make('TradingEnv', df=self.stock_data, positions=self.positions, windows=self.windows, trading_fees=self.trading_fees, borrow_interest_rate=self.borrow_interest_rate, portfolio_initial_value=self.portfolio_initial_value, initial_position=self.initial_position, max_episode_duration=self.max_episode_duration, verbose=self.verbose)
+        self.env = gym.make('TradingEnv', df=self.df, positions=self.positions, windows=self.windows, trading_fees=self.trading_fees, borrow_interest_rate=self.borrow_interest_rate, portfolio_initial_value=self.portfolio_initial_value, initial_position=self.initial_position, max_episode_duration=self.max_episode_duration, verbose=self.verbose)
         self.action_space = self.env.action_space
 
         # Add custom metrics
@@ -53,3 +52,7 @@ class StockTradingEnvironment:
 
     def close(self):
         self.env.close()
+
+def make_env(file_path, **kwargs):
+    df = pd.read_csv(file_path, index_col='date', parse_dates=True)
+    return StockTradingEnvironment(df, **kwargs).env

@@ -3,7 +3,4 @@ matplotlib
 numpy
 pandas
 ta
-tensorflow
 yfinance
-cProfile
-pstats

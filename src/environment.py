@@ -2,7 +2,7 @@ import gymnasium as gym
 import gym_trading_env
 import pandas as pd
 import numpy as np
-from ta import add_all_ta_features
+from src.features import select_optimal_indicators, apply_optimal_indicators
 
 np.random.seed(69)
 
@@ -21,10 +21,11 @@ class StockTradingEnvironment:
         self.initial_position = kwargs.get('initial_position', 'random')
         self.max_episode_duration = kwargs.get('max_episode_duration', 'max')
         self.verbose = kwargs.get('verbose', 1)
+        self.n_select = kwargs.get('n_select', 10)
 
-        # Adding technical indicators
-        self.df = self._add_technical_indicators(self.df)
-        print("Columns after adding technical indicators:", self.df.columns)  # Debugging line
+        # Adding optimal technical indicators
+        self.df = self._add_optimal_indicators(self.df)
+        print("Columns after adding optimal technical indicators:", self.df.columns)  # Debugging line
 
         # Initialize the gym-trading-env environment
         self.env = gym.make(
@@ -45,17 +46,46 @@ class StockTradingEnvironment:
         self.env.unwrapped.add_metric('Position Changes', lambda history: np.sum(np.diff(history['position']) != 0))
         self.env.unwrapped.add_metric('Episode Length', lambda history: len(history['position']))
 
-    def _add_technical_indicators(self, df):
-        df = add_all_ta_features(df, open="open", high="high", low="low", close="close", volume="volume")
+    def _add_optimal_indicators(self, df):
+        try:
+            optimal_features = select_optimal_indicators(df, n_select=self.n_select)
+            df = apply_optimal_indicators(df, optimal_features)
+        except Exception as e:
+            print(f"Error adding optimal technical indicators: {e}")
         df.fillna(0, inplace=True)
         return df
+
+    def custom_reward_function(self, history):
+        # Logarithmic change in portfolio valuation
+        log_return = np.log(history["portfolio_valuation"][-1] / history["portfolio_valuation"][-2])
+        
+        # Drawdown calculation
+        max_val = np.max(history["portfolio_valuation"][:])
+        drawdown = (max_val - history["portfolio_valuation"][-1]) / max_val
+
+        # Add a component to reward consistent growth
+        consistency_bonus = 0.1 if log_return > 0 else 0
+        
+        # Penalize excessive trading
+        trading_penalty = 0.001 * (history["position"][-1] != history["position"][-2])
+
+        # Reward is adjusted by subtracting the drawdown penalty and adding consistency bonus
+        reward = log_return - drawdown + consistency_bonus - trading_penalty
+        return reward
 
     def reset(self):
         observation, info = self.env.reset()
         return observation, info
 
     def step(self, action):
-        observation, reward, terminated, truncated, info = self.env.step(action)
+        observation, _, terminated, truncated, info = self.env.step(action)
+
+        # Fetch the history from the environment
+        history = self.env.unwrapped.history
+
+        # Calculate custom reward
+        reward = self.custom_reward_function(history)
+
         return observation, reward, terminated, truncated, info
 
     def render(self, mode='human'):
@@ -66,8 +96,7 @@ class StockTradingEnvironment:
 
 def make_env(file_path, **kwargs):
     df = pd.read_csv(file_path, index_col='date', parse_dates=True)
-    print(f"DataFrame head: {df.head()}")  # Debugging line
-    df = add_all_ta_features(df, open="open", high="high", low="low", close="close", volume="volume")
-    df.fillna(0, inplace=True)
-    print(f"DataFrame with TA features head: {df.head()}")  # Debugging line
-    return StockTradingEnvironment(df, **kwargs).env
+    print(f"DataFrame head before adding optimal TA features:\n{df.head()}")  # Debugging line
+    env = StockTradingEnvironment(df, **kwargs).env
+    print(f"DataFrame head after adding optimal TA features:\n{env.unwrapped.df.head()}")  # Changed this line
+    return env

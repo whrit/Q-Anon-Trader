@@ -10,7 +10,7 @@ class StockTradingEnvironment:
     """This class wraps the gym-trading-env environment."""
 
     def __init__(self, df, **kwargs):
-        self.df = df
+        self.df = df.copy()  # Ensure we're working with a copy
         self.train = kwargs.get('train', True)
         self.number_of_days_to_consider = kwargs.get('number_of_days_to_consider', 20)
         self.positions = kwargs.get('positions', [-1, 0, 1])
@@ -21,11 +21,11 @@ class StockTradingEnvironment:
         self.initial_position = kwargs.get('initial_position', 'random')
         self.max_episode_duration = kwargs.get('max_episode_duration', 'max')
         self.verbose = kwargs.get('verbose', 1)
-        self.n_select = kwargs.get('n_select', 10)
+        self.n_select = kwargs.get('n_select', 15)
 
         # Adding optimal technical indicators
         self.df = self._add_optimal_indicators(self.df)
-        print("Columns after adding optimal technical indicators:", self.df.columns)  # Debugging line
+        print("Columns after adding optimal technical indicators:", self.df.columns)
 
         # Initialize the gym-trading-env environment
         self.env = gym.make(
@@ -48,12 +48,25 @@ class StockTradingEnvironment:
 
     def _add_optimal_indicators(self, df):
         try:
+            print("Shape of DataFrame before adding indicators:", df.shape)
             optimal_features = select_optimal_indicators(df, n_select=self.n_select)
-            df = apply_optimal_indicators(df, optimal_features)
+            df_with_indicators = apply_optimal_indicators(df, optimal_features)
+            print("Shape of DataFrame after adding indicators:", df_with_indicators.shape)
+            print(f"Selected {len(optimal_features)} optimal features: {optimal_features}")
+            
+            # Fill NaN values
+            df_filled = df_with_indicators.fillna(0)
+            
+            # Check if any NaN values remain
+            if df_filled.isna().any().any():
+                print("Warning: NaN values still present after filling.")
+                print(df_filled.isna().sum())
+            
+            return df_filled
         except Exception as e:
             print(f"Error adding optimal technical indicators: {e}")
-        df.fillna(0, inplace=True)
-        return df
+            # Return the original DataFrame if an error occurs
+            return df
 
     def custom_reward_function(self, history):
         # Logarithmic change in portfolio valuation
@@ -96,7 +109,7 @@ class StockTradingEnvironment:
 
 def make_env(file_path, **kwargs):
     df = pd.read_csv(file_path, index_col='date', parse_dates=True)
-    print(f"DataFrame head before adding optimal TA features:\n{df.head()}")  # Debugging line
+    print(f"DataFrame head before adding optimal TA features:\n{df.head()}")
     env = StockTradingEnvironment(df, **kwargs).env
-    print(f"DataFrame head after adding optimal TA features:\n{env.unwrapped.df.head()}")  # Changed this line
+    print(f"DataFrame head after adding optimal TA features:\n{env.unwrapped.df.head()}")
     return env

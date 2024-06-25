@@ -9,25 +9,36 @@ np.random.seed(69)
 class StockTradingEnvironment:
     """This class wraps the gym-trading-env environment."""
 
-    def __init__(self, df, train=True, number_of_days_to_consider=20, positions=[-1, 0, 1], windows=None, trading_fees=0, borrow_interest_rate=0, portfolio_initial_value=1000, initial_position='random', max_episode_duration='max', verbose=1):
+    def __init__(self, df, **kwargs):
         self.df = df
-        self.train = train
-        self.number_of_days_to_consider = number_of_days_to_consider
-        self.positions = positions
-        self.windows = windows
-        self.trading_fees = trading_fees
-        self.borrow_interest_rate = borrow_interest_rate
-        self.portfolio_initial_value = portfolio_initial_value
-        self.initial_position = initial_position
-        self.max_episode_duration = max_episode_duration
-        self.verbose = verbose
+        self.train = kwargs.get('train', True)
+        self.number_of_days_to_consider = kwargs.get('number_of_days_to_consider', 20)
+        self.positions = kwargs.get('positions', [-1, 0, 1])
+        self.windows = kwargs.get('windows', None)
+        self.trading_fees = kwargs.get('trading_fees', 0)
+        self.borrow_interest_rate = kwargs.get('borrow_interest_rate', 0)
+        self.portfolio_initial_value = kwargs.get('portfolio_initial_value', 1000)
+        self.initial_position = kwargs.get('initial_position', 'random')
+        self.max_episode_duration = kwargs.get('max_episode_duration', 'max')
+        self.verbose = kwargs.get('verbose', 1)
 
         # Adding technical indicators
         self.df = self._add_technical_indicators(self.df)
         print("Columns after adding technical indicators:", self.df.columns)  # Debugging line
 
         # Initialize the gym-trading-env environment
-        self.env = gym.make('TradingEnv', df=self.df, positions=self.positions, windows=self.windows, trading_fees=self.trading_fees, borrow_interest_rate=self.borrow_interest_rate, portfolio_initial_value=self.portfolio_initial_value, initial_position=self.initial_position, max_episode_duration=self.max_episode_duration, verbose=self.verbose)
+        self.env = gym.make(
+            'TradingEnv',
+            df=self.df,
+            positions=self.positions,
+            windows=self.windows,
+            trading_fees=self.trading_fees,
+            borrow_interest_rate=self.borrow_interest_rate,
+            portfolio_initial_value=self.portfolio_initial_value,
+            initial_position=self.initial_position,
+            max_episode_duration=self.max_episode_duration,
+            verbose=self.verbose
+        )
         self.action_space = self.env.action_space
 
         # Add custom metrics
@@ -55,4 +66,8 @@ class StockTradingEnvironment:
 
 def make_env(file_path, **kwargs):
     df = pd.read_csv(file_path, index_col='date', parse_dates=True)
+    print(f"DataFrame head: {df.head()}")  # Debugging line
+    df = add_all_ta_features(df, open="open", high="high", low="low", close="close", volume="volume")
+    df.fillna(0, inplace=True)
+    print(f"DataFrame with TA features head: {df.head()}")  # Debugging line
     return StockTradingEnvironment(df, **kwargs).env

@@ -7,67 +7,59 @@ import numpy as np
 # Setting up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def save_pickle(q_table, object_name):
+def save_pickle(obj, object_name):
     with open(object_name, "wb") as f:
-        pickle.dump(q_table, f)
+        pickle.dump(obj, f)
     logging.info('Pickle file saved as %s', object_name)
 
 def load_pickle(object_name):
     with open(object_name, "rb") as f:
-        deserialized_dict = pickle.load(f)
+        deserialized_obj = pickle.load(f)
     logging.info('Pickle file %s loaded', object_name)
-    return deserialized_dict
+    return deserialized_obj
 
-def run_learned_policy(env, agent):
+def run_learned_policy(env, agent, verbose=False):
     obs, _ = env.reset()
     terminated, truncated = False, False
     
-    logging.info("Initial state: %s", obs.reshape((4, 5)))
+    if verbose:
+        logging.info("Initial state: %s", obs)
     
     total_reward = 0
     steps = 0
     
-    while not terminated:
-        action = np.argmax(agent.q_table[obs, :])
-        action_names = ['Down', 'Up', 'Right', 'Left']
-        action_took = action_names[action]
-        logging.info("Agent opts to take the following action: %s", action_took)
+    while not terminated and not truncated:
+        action = agent.act({"observation": obs})
+        
+        if verbose:
+            logging.info("Agent opts to take the following action: %s", action)
         
         obs, reward, terminated, truncated, info = env.step(action)
         total_reward += reward
         
-        logging.info("New Observation: %s; Immediate Reward: %d, Termination Status: %s, Info: %s", 
-                     obs.reshape((4, 5)), reward, terminated, info.get('Termination Message', ''))
-        time.sleep(1)
-        logging.info('**************')
-        steps += 1
-
-    logging.info("Total Reward Collected Over the Episode: %d in Steps: %d", total_reward, steps)
-
-def run_learned_policy_suppressed_printing(env, agent):
-    obs, _ = env.reset()
-    terminated, truncated = False, False
-    
-    total_reward = 0
-    steps = 0
-    
-    while not terminated:
-        action = np.argmax(agent.q_table[obs, :])
-        obs, reward, terminated, truncated, _ = env.step(action)
-        total_reward += reward
-        steps += 1
+        if verbose:
+            logging.info("New Observation: %s; Immediate Reward: %f, Termination Status: %s, Info: %s", 
+                         obs, reward, terminated, info)
+            time.sleep(1)
+            logging.info('**************')
         
+        steps += 1
+
+    if verbose:
+        logging.info("Total Reward Collected Over the Episode: %f in Steps: %d", total_reward, steps)
+
     return total_reward
 
-def plot_grid(env, agent, reward_across_episodes: list, epsilons_across_episodes: list) -> None:
-    """Plot main and extra plots in a 2x2 grid."""
-    
-    env.train = False
-    total_reward_learned_policy = [run_learned_policy_suppressed_printing(env, agent) for _ in range(30)]
-    
+def run_multiple_episodes(env, agent, num_episodes=30):
+    total_rewards = []
+    for _ in range(num_episodes):
+        total_reward = run_learned_policy(env, agent)
+        total_rewards.append(total_reward)
+    return total_rewards
+
+def plot_training_progress(reward_across_episodes, epsilons_across_episodes, total_reward_learned_policy):
     plt.figure(figsize=(15, 10))
 
-    # Main plot
     plt.subplot(2, 2, 1)
     plt.plot(reward_across_episodes, 'ro')
     plt.xlabel('Episode')
@@ -82,7 +74,6 @@ def plot_grid(env, agent, reward_across_episodes: list, epsilons_across_episodes
     plt.title('Rewards Per Episode (Learned Policy Evaluation)')
     plt.grid()
 
-    # Extra plots
     plt.subplot(2, 2, 3)
     plt.plot(reward_across_episodes)
     plt.xlabel('Episode')

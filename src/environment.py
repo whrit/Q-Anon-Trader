@@ -2,14 +2,15 @@ import gymnasium as gym
 import gym_trading_env
 import pandas as pd
 import numpy as np
-from src.features import select_optimal_indicators, apply_optimal_indicators
+from typing import Dict, Any
+from src.data import preprocess_data, debug_dataframe
 
 np.random.seed(69)
 
 class StockTradingEnvironment:
     """This class wraps the gym-trading-env environment."""
 
-    def __init__(self, df, **kwargs):
+    def __init__(self, df: pd.DataFrame, **kwargs: Any):
         self.df = df.copy()  # Ensure we're working with a copy
         self.train = kwargs.get('train', True)
         self.number_of_days_to_consider = kwargs.get('number_of_days_to_consider', 20)
@@ -23,14 +24,21 @@ class StockTradingEnvironment:
         self.verbose = kwargs.get('verbose', 1)
         self.n_select = kwargs.get('n_select', 15)
 
-        # Adding optimal technical indicators
-        self.df = self._add_optimal_indicators(self.df)
-        print("Columns after adding optimal technical indicators:", self.df.columns)
+        # Preprocess data using the function from data.py
+        X_scaled, self.scaler, self.optimal_features = preprocess_data(self.df, self.n_select)
+        self.df_processed = pd.DataFrame(X_scaled, columns=self.optimal_features, index=self.df.index)
+
+        # Add back the basic columns if they're not in optimal_features
+        for col in ['open', 'high', 'low', 'close', 'volume']:
+            if col not in self.optimal_features:
+                self.df_processed[col] = self.df[col]
+
+        print("Columns after preprocessing:", self.df_processed.columns)
 
         # Initialize the gym-trading-env environment
         self.env = gym.make(
             'TradingEnv',
-            df=self.df,
+            df=self.df_processed,
             positions=self.positions,
             windows=self.windows,
             trading_fees=self.trading_fees,
@@ -41,56 +49,54 @@ class StockTradingEnvironment:
             verbose=self.verbose
         )
         self.action_space = self.env.action_space
+        self.observation_space = self.env.observation_space
 
         # Add custom metrics
         self.env.unwrapped.add_metric('Position Changes', lambda history: np.sum(np.diff(history['position']) != 0))
         self.env.unwrapped.add_metric('Episode Length', lambda history: len(history['position']))
 
-    def _add_optimal_indicators(self, df):
-        try:
-            print("Shape of DataFrame before adding indicators:", df.shape)
-            optimal_features = select_optimal_indicators(df, n_select=self.n_select)
-            df_with_indicators = apply_optimal_indicators(df, optimal_features)
-            print("Shape of DataFrame after adding indicators:", df_with_indicators.shape)
-            print(f"Selected {len(optimal_features)} optimal features: {optimal_features}")
-            
-            # Fill NaN values
-            df_filled = df_with_indicators.fillna(0)
-            
-            # Check if any NaN values remain
-            if df_filled.isna().any().any():
-                print("Warning: NaN values still present after filling.")
-                print(df_filled.isna().sum())
-            
-            return df_filled
-        except Exception as e:
-            print(f"Error adding optimal technical indicators: {e}")
-            # Return the original DataFrame if an error occurs
-            return df
+        # Initialize tracking variables
+        self.previous_portfolio_value = self.portfolio_initial_value
+        self.max_portfolio_value = self.portfolio_initial_value
+        self.holding_duration = 0
 
-    def custom_reward_function(self, history):
-        # Logarithmic change in portfolio valuation
-        log_return = np.log(history["portfolio_valuation"][-1] / history["portfolio_valuation"][-2])
+    def custom_reward_function(self, history: Dict[str, Any]) -> float:
+        current_portfolio_value = history["portfolio_valuation"][-1]
         
-        # Drawdown calculation
-        max_val = np.max(history["portfolio_valuation"][:])
-        drawdown = (max_val - history["portfolio_valuation"][-1]) / max_val
-
-        # Add a component to reward consistent growth
-        consistency_bonus = 0.1 if log_return > 0 else 0
+        # Sharpe ratio component
+        returns = np.diff(history["portfolio_valuation"]) / history["portfolio_valuation"][:-1]
+        sharpe_ratio = np.mean(returns) / (np.std(returns) + 1e-9)  # Add small epsilon to avoid division by zero
         
-        # Penalize excessive trading
-        trading_penalty = 0.001 * (history["position"][-1] != history["position"][-2])
-
-        # Reward is adjusted by subtracting the drawdown penalty and adding consistency bonus
-        reward = log_return - drawdown + consistency_bonus - trading_penalty
+        # Drawdown component
+        drawdown = (self.max_portfolio_value - current_portfolio_value) / self.max_portfolio_value
+        
+        # Position holding duration component
+        if history["position"][-1] != 0:
+            self.holding_duration += 1
+        else:
+            self.holding_duration = 0
+        holding_penalty = -0.001 * self.holding_duration  # Penalize long holdings
+        
+        # Trading activity component
+        trading_penalty = -0.001 * (history["position"][-1] != history["position"][-2])
+        
+        # Combine components
+        reward = 10 * sharpe_ratio - 5 * drawdown + holding_penalty + trading_penalty
+        
+        # Update tracking variables
+        self.previous_portfolio_value = current_portfolio_value
+        self.max_portfolio_value = max(self.max_portfolio_value, current_portfolio_value)
+        
         return reward
 
     def reset(self):
         observation, info = self.env.reset()
+        self.previous_portfolio_value = self.portfolio_initial_value
+        self.max_portfolio_value = self.portfolio_initial_value
+        self.holding_duration = 0
         return observation, info
 
-    def step(self, action):
+    def step(self, action: int):
         observation, _, terminated, truncated, info = self.env.step(action)
 
         # Fetch the history from the environment
@@ -101,15 +107,16 @@ class StockTradingEnvironment:
 
         return observation, reward, terminated, truncated, info
 
-    def render(self, mode='human'):
+    def render(self, mode: str = 'human'):
         self.env.render()
 
     def close(self):
         self.env.close()
 
-def make_env(file_path, **kwargs):
-    df = pd.read_csv(file_path, index_col='date', parse_dates=True)
-    print(f"DataFrame head before adding optimal TA features:\n{df.head()}")
+def make_env(file_path: str, **kwargs: Any) -> gym.Env:
+    df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+    print(f"DataFrame head after reading preprocessed data:\n{df.head()}")
     env = StockTradingEnvironment(df, **kwargs).env
-    print(f"DataFrame head after adding optimal TA features:\n{env.unwrapped.df.head()}")
+    print(f"Environment observation space: {env.observation_space}")
+    print(f"Environment action space: {env.action_space}")
     return env

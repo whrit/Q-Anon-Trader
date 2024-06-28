@@ -1,8 +1,21 @@
+import yfinance as yf
 import pandas as pd
 import numpy as np
 import talib
 from sklearn.feature_selection import mutual_info_regression
 from sklearn.preprocessing import StandardScaler
+import os
+
+def fetch_stock_data(symbol, start_date, end_date, output_file=None):
+    stock_data = yf.download(symbol, start=start_date, end=end_date)
+    stock_data['Close'] = stock_data['Adj Close']
+    stock_data = stock_data.drop(columns=['Adj Close'])
+    stock_data.columns = stock_data.columns.str.lower()
+    
+    if output_file:
+        stock_data.to_csv(output_file)
+    
+    return stock_data
 
 def add_technical_indicators(df):
     open_data = df['open']
@@ -118,10 +131,59 @@ def apply_optimal_indicators(df, optimal_features):
     df_indicators = add_technical_indicators(df)
     return df_indicators[['open', 'high', 'low', 'close', 'volume'] + optimal_features]
 
-# Add this function to help with debugging
-def debug_dataframe(df, name="DataFrame"):
+def preprocess_data(data, n_select=15):
+    # Add technical indicators
+    data_with_indicators = add_technical_indicators(data)
+    
+    # Select optimal indicators
+    optimal_features = select_optimal_indicators(data_with_indicators, n_select=n_select)
+    
+    # Apply optimal indicators
+    data_optimal = apply_optimal_indicators(data_with_indicators, optimal_features)
+    
+    # Prepare for scaling
+    X = data_optimal.drop(['open', 'high', 'low', 'close', 'volume'], axis=1)
+    
+    # Scale the data
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Create a new DataFrame with scaled features and original OHLCV data
+    preprocessed_data = pd.DataFrame(X_scaled, columns=optimal_features, index=data.index)
+    preprocessed_data[['open', 'high', 'low', 'close', 'volume']] = data[['open', 'high', 'low', 'close', 'volume']]
+    
+    return preprocessed_data, scaler, optimal_features
+
+def debug_dataframe(df, name="DataFrame", save_csv=False, output_file=None):
     print(f"\nDebugging {name}:")
     print(f"Shape: {df.shape}")
     print(f"Columns: {df.columns.tolist()}")
     print(f"NaN values:\n{df.isna().sum()}")
     print(f"First few rows:\n{df.head()}\n")
+
+    if save_csv:
+        if output_file is None:
+            output_file = f"{name.lower().replace(' ', '_')}_debug.csv"
+        
+        # Check if the output_file contains a directory path
+        dir_name = os.path.dirname(output_file)
+        if dir_name:  # Only try to create the directory if dir_name is not empty
+            os.makedirs(dir_name, exist_ok=True)
+        
+        df.to_csv(output_file)
+        print(f"Saved DataFrame to {output_file}")
+
+def prepare_data(symbol, start_date, end_date, n_select=15, debug=False):
+    # Fetch stock data
+    stock_data = fetch_stock_data(symbol, start_date, end_date)
+    
+    if debug:
+        debug_dataframe(stock_data, "Raw Stock Data", save_csv=True, output_file="raw_stock_data.csv")
+    
+    # Preprocess data
+    preprocessed_data, scaler, optimal_features = preprocess_data(stock_data, n_select)
+    
+    if debug:
+        debug_dataframe(preprocessed_data, "Preprocessed Data", save_csv=True, output_file="preprocessed_data.csv")
+    
+    return preprocessed_data, scaler, optimal_features, stock_data
